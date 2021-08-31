@@ -109,12 +109,11 @@ class DatabaseWorker():
 vacancys = Headhunter()
 db = DatabaseWorker()
 for url in vacancys.GetVacancysList():
-    # что бы не делать запрос к API каждый раз
-    vacancy_detail_dict = vacancys.GetVacancyDetail(url)
-    # проверяем наличие hh_id в локальной БД что бы не дергать базу одними и теми же вакансиями
+    # берем id из ссылки(url) и проверяем наличие hh_id в локальной БД что бы не дергать базу одними и теми же вакансиями
     # и начинаем проверку других таблиц только если hh_id нет в базе
-    select_hh_id = """SELECT hh_id FROM vacancy WHERE hh_id = $${vac}$$;""".format(vac = vacancy_detail_dict['id'])
-    if len(db.SqlRequest(select_hh_id)) == 0:
+    if len(db.SqlRequest("""SELECT hh_id FROM vacancy WHERE hh_id=$${req_id}$$""".format(req_id=int(url[28:36])))) == 0:
+        # что бы не делать запрос к API каждый раз
+        vacancy_detail_dict = vacancys.GetVacancyDetail(url)
         # запись ключевых навыков в БД
         skill_list = [skill['name'] for skill in vacancy_detail_dict['key_skills']]
         for skill in skill_list:
@@ -143,28 +142,31 @@ for url in vacancys.GetVacancysList():
             salary_to = 0
             salary_currency = 'n/n'
         else:
-            salary_from = vacancy_detail_dict['salary']['from']
+            if vacancy_detail_dict['salary']['from'] is None:
+                salary_from = 0
+            else:
+                salary_from = vacancy_detail_dict['salary']['from']
 
             if vacancy_detail_dict['salary']['to'] is None:
                 salary_to = 0
             else:
                 salary_to = vacancy_detail_dict['salary']['to']
             salary_currency = vacancy_detail_dict['salary']['currency']
-        
+                
         # кортеж с данными о вакансии
         select_city_id = """SELECT id FROM city WHERE name=$${}$$""".format(vacancy_detail_dict['area']['name'])
         select_employer_id = """SELECT id FROM employer WHERE name=$${}$$""".format(vacancy_detail_dict['employer']['name'])
         
         vacancy_detail_tuple = (
-            vacancy_detail_dict['id'], #строка
+            int(vacancy_detail_dict['id']), #строка
             vacancy_detail_dict['name'],
-            salary_from,
-            salary_to,
+            int(salary_from),
+            int(salary_to),
             salary_currency,
             vacancy_detail_dict['description'],
             vacancy_detail_dict['created_at'][:10],
-            [id[0] for id in db.SqlRequest(select_city_id)][0],
-            [id[0] for id in db.SqlRequest(select_employer_id)][0]
+            int([id[0] for id in db.SqlRequest(select_city_id)][0]),
+            int([id[0] for id in db.SqlRequest(select_employer_id)][0])
         )
 
         # запись вакансии в БД
@@ -178,7 +180,6 @@ for url in vacancys.GetVacancysList():
         # запись связующей таблицы vacancy_skill
         select_vacancy_id = """SELECT id FROM vacancy WHERE hh_id=$${req_id}$$""".format(req_id = vacancy_detail_dict['id'])
         vacancy_id = [id[0] for id in db.SqlRequest(select_vacancy_id)]
-        # select_skill_id = """SELECT id FROM keyskill WHERE name=$${req_skill}$$""".format(req_skill = skill)
         skill_id_list = [[id[0] for id in db.SqlRequest("""SELECT id FROM keyskill WHERE name=$${req_skill}$$""".format(req_skill = skill))][0] for skill in skill_list]
         vacancy_id_skill_id_pair = [(vac_id, s_id) for vac_id in vacancy_id for s_id in skill_id_list]
         for pair in vacancy_id_skill_id_pair:
