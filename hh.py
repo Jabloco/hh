@@ -106,87 +106,99 @@ class DatabaseWorker():
                 cursor.close()
                 connection.close
 
-vacancys = Headhunter()
+
 db = DatabaseWorker()
-for url in vacancys.GetVacancysList():
-    # берем id из ссылки(url) и проверяем наличие hh_id в локальной БД что бы не дергать базу одними и теми же вакансиями
-    # и начинаем проверку других таблиц только если hh_id нет в базе
-    if len(db.SqlRequest("""SELECT hh_id FROM vacancy WHERE hh_id=$${req_id}$$""".format(req_id=int(url[28:36])))) == 0:
-        # что бы не делать запрос к API каждый раз
-        vacancy_detail_dict = vacancys.GetVacancyDetail(url)
-        # запись ключевых навыков в БД
-        skill_list = [skill['name'] for skill in vacancy_detail_dict['key_skills']]
-        for skill in skill_list:
-            select_keyskill = """SELECT name FROM keyskill WHERE name = $${req_skill}$$;""".format(req_skill=skill)
-            if skill not in [skill[0] for skill in db.SqlRequest(select_keyskill)]:
-                insert_keyskill = """INSERT INTO keyskill (name) VALUES ($${req_skill}$$);""".format(req_skill=skill)
-                db.SqlRequest(insert_keyskill)
-        
-        # запись городов в БД
-        city_name = vacancy_detail_dict['area']['name']
-        select_city = """SELECT name FROM city WHERE name = $${req_city}$$""".format(req_city = city_name)
-        if city_name not in [city[0] for city in db.SqlRequest(select_city)]:
-            insert_city = """INSERT INTO city (name) VALUES ($${req_city}$$)""".format(req_city = city_name)
-            db.SqlRequest(insert_city)
 
-        # запись работодателей в БД
-        employer_tuple = (vacancy_detail_dict['employer']['name'], vacancy_detail_dict['employer']['url'])
-        select_employer = """SELECT name FROM employer WHERE name = $${req_employer}$$""".format(req_employer=vacancy_detail_dict['employer']['name'])
-        if employer_tuple[0] not in [employer[0] for employer in db.SqlRequest(select_employer)]:
-            insert_employer = """INSERT INTO employer (name, url) VALUES ($${}$$, $${}$$)""".format(*employer_tuple)
-            db.SqlRequest(insert_employer)
+# читаем строки запроса из файла, что бы в ручную не вызывать класс Headhunter
+# с разными атрибутами
+with open('req_str.txt', 'r', encoding='utf8') as file:
+    req_str_list = []
+    for line in file:
+        req_str_list.append(line.strip())
 
-        # обработка пустых значений вознаграждения
-        if vacancy_detail_dict['salary'] is None:
-            salary_from = 0
-            salary_to = 0
-            salary_currency = 'n/n'
-        else:
-            if vacancy_detail_dict['salary']['from'] is None:
+for req_str in req_str_list:
+    print('--->', req_str)
+    vacancys = Headhunter(req_str)
+    for url in vacancys.GetVacancysList():
+        # берем id из ссылки(url) и проверяем наличие hh_id в локальной БД что бы не дергать базу одними и теми же вакансиями
+        # и начинаем проверку других таблиц только если hh_id нет в базе
+        if len(db.SqlRequest("""SELECT hh_id FROM vacancy WHERE hh_id=$${req_id}$$""".format(req_id=int(url[28:36])))) == 0:
+            # что бы не делать запрос к API каждый раз
+            vacancy_detail_dict = vacancys.GetVacancyDetail(url)
+            print(vacancy_detail_dict['name'])
+            # запись ключевых навыков в БД
+            skill_list = [skill['name'] for skill in vacancy_detail_dict['key_skills']]
+            for skill in skill_list:
+                select_keyskill = """SELECT name FROM keyskill WHERE name = $${req_skill}$$;""".format(req_skill=skill)
+                if skill not in [skill[0] for skill in db.SqlRequest(select_keyskill)]:
+                    insert_keyskill = """INSERT INTO keyskill (name) VALUES ($${req_skill}$$);""".format(req_skill=skill)
+                    db.SqlRequest(insert_keyskill)
+            
+            # запись городов в БД
+            city_name = vacancy_detail_dict['area']['name']
+            select_city = """SELECT name FROM city WHERE name = $${req_city}$$""".format(req_city = city_name)
+            if city_name not in [city[0] for city in db.SqlRequest(select_city)]:
+                insert_city = """INSERT INTO city (name) VALUES ($${req_city}$$)""".format(req_city = city_name)
+                db.SqlRequest(insert_city)
+
+            # запись работодателей в БД
+            employer_tuple = (vacancy_detail_dict['employer']['name'], vacancy_detail_dict['employer']['url'])
+            select_employer = """SELECT name FROM employer WHERE name = $${req_employer}$$""".format(req_employer=vacancy_detail_dict['employer']['name'])
+            if employer_tuple[0] not in [employer[0] for employer in db.SqlRequest(select_employer)]:
+                insert_employer = """INSERT INTO employer (name, url) VALUES ($${}$$, $${}$$)""".format(*employer_tuple)
+                db.SqlRequest(insert_employer)
+
+            # обработка пустых значений вознаграждения
+            if vacancy_detail_dict['salary'] is None:
                 salary_from = 0
-            else:
-                salary_from = vacancy_detail_dict['salary']['from']
-
-            if vacancy_detail_dict['salary']['to'] is None:
                 salary_to = 0
+                salary_currency = 'n/n'
             else:
-                salary_to = vacancy_detail_dict['salary']['to']
-            salary_currency = vacancy_detail_dict['salary']['currency']
-                
-        # кортеж с данными о вакансии
-        select_city_id = """SELECT id FROM city WHERE name=$${}$$""".format(vacancy_detail_dict['area']['name'])
-        select_employer_id = """SELECT id FROM employer WHERE name=$${}$$""".format(vacancy_detail_dict['employer']['name'])
-        
-        vacancy_detail_tuple = (
-            int(vacancy_detail_dict['id']), #строка
-            vacancy_detail_dict['name'],
-            int(salary_from),
-            int(salary_to),
-            salary_currency,
-            vacancy_detail_dict['description'],
-            vacancy_detail_dict['created_at'][:10],
-            int([id[0] for id in db.SqlRequest(select_city_id)][0]),
-            int([id[0] for id in db.SqlRequest(select_employer_id)][0])
-        )
+                if vacancy_detail_dict['salary']['from'] is None:
+                    salary_from = 0
+                else:
+                    salary_from = vacancy_detail_dict['salary']['from']
 
-        # запись вакансии в БД
-        select_vacancy = """SELECT hh_id FROM vacancy WHERE hh_id=$${req_hh_id}$$""".format(req_hh_id = vacancy_detail_tuple[0])
-        if int(vacancy_detail_tuple[0]) not in [vacancy_id[0] for vacancy_id in db.SqlRequest(select_vacancy)]:
-            insert_vacancy = """INSERT INTO vacancy 
-            (hh_id, name, salary_from, salary_to, salary_currency, description, date_create, city_id, employer_id)
-            VALUES ($${}$$, $${}$$, $${}$$, $${}$$,$${}$$,$${}$$,$${}$$,$${}$$,$${}$$)""".format(*vacancy_detail_tuple) # ни чего лучше я не придумал =(
-            db.SqlRequest(insert_vacancy)
+                if vacancy_detail_dict['salary']['to'] is None:
+                    salary_to = 0
+                else:
+                    salary_to = vacancy_detail_dict['salary']['to']
+                salary_currency = vacancy_detail_dict['salary']['currency']
                     
-        # запись связующей таблицы vacancy_skill
-        select_vacancy_id = """SELECT id FROM vacancy WHERE hh_id=$${req_id}$$""".format(req_id = vacancy_detail_dict['id'])
-        vacancy_id = [id[0] for id in db.SqlRequest(select_vacancy_id)]
-        skill_id_list = [[id[0] for id in db.SqlRequest("""SELECT id FROM keyskill WHERE name=$${req_skill}$$""".format(req_skill = skill))][0] for skill in skill_list]
-        vacancy_id_skill_id_pair = [(vac_id, s_id) for vac_id in vacancy_id for s_id in skill_id_list]
-        for pair in vacancy_id_skill_id_pair:
-            select_pair = """SELECT vacancy_id, keyskill_id FROM vacancy_skill WHERE vacancy_id=$${req_vacancy_id}$$""".format(req_vacancy_id = vacancy_id[0] )
-            if pair not in [pair for pair in db.SqlRequest(select_pair)]:
-                insert_pair = """INSERT INTO vacancy_skill (vacancy_id, keyskill_id) VALUES ($${}$$, $${}$$)""".format(*pair)
-                db.SqlRequest(insert_pair)
+            # кортеж с данными о вакансии
+            select_city_id = """SELECT id FROM city WHERE name=$${}$$""".format(vacancy_detail_dict['area']['name'])
+            select_employer_id = """SELECT id FROM employer WHERE name=$${}$$""".format(vacancy_detail_dict['employer']['name'])
+            
+            vacancy_detail_tuple = (
+                int(vacancy_detail_dict['id']), #строка
+                vacancy_detail_dict['name'],
+                int(salary_from),
+                int(salary_to),
+                salary_currency,
+                vacancy_detail_dict['description'],
+                vacancy_detail_dict['created_at'][:10],
+                int([id[0] for id in db.SqlRequest(select_city_id)][0]),
+                int([id[0] for id in db.SqlRequest(select_employer_id)][0])
+            )
+
+            # запись вакансии в БД
+            select_vacancy = """SELECT hh_id FROM vacancy WHERE hh_id=$${req_hh_id}$$""".format(req_hh_id = vacancy_detail_tuple[0])
+            if int(vacancy_detail_tuple[0]) not in [vacancy_id[0] for vacancy_id in db.SqlRequest(select_vacancy)]:
+                insert_vacancy = """INSERT INTO vacancy 
+                (hh_id, name, salary_from, salary_to, salary_currency, description, date_create, city_id, employer_id)
+                VALUES ($${}$$, $${}$$, $${}$$, $${}$$,$${}$$,$${}$$,$${}$$,$${}$$,$${}$$)""".format(*vacancy_detail_tuple) # ни чего лучше я не придумал =(
+                db.SqlRequest(insert_vacancy)
+                        
+            # запись связующей таблицы vacancy_skill
+            select_vacancy_id = """SELECT id FROM vacancy WHERE hh_id=$${req_id}$$""".format(req_id = vacancy_detail_dict['id'])
+            vacancy_id = [id[0] for id in db.SqlRequest(select_vacancy_id)]
+            skill_id_list = [[id[0] for id in db.SqlRequest("""SELECT id FROM keyskill WHERE name=$${req_skill}$$""".format(req_skill = skill))][0] for skill in skill_list]
+            vacancy_id_skill_id_pair = [(vac_id, s_id) for vac_id in vacancy_id for s_id in skill_id_list]
+            for pair in vacancy_id_skill_id_pair:
+                select_pair = """SELECT vacancy_id, keyskill_id FROM vacancy_skill WHERE vacancy_id=$${req_vacancy_id}$$""".format(req_vacancy_id = vacancy_id[0] )
+                if pair not in [pair for pair in db.SqlRequest(select_pair)]:
+                    insert_pair = """INSERT INTO vacancy_skill (vacancy_id, keyskill_id) VALUES ($${}$$, $${}$$)""".format(*pair)
+                    db.SqlRequest(insert_pair)
     
 
 # req = """SELect id, name FROM keyskill where name = 'Python'"""
